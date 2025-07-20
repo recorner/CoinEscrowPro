@@ -425,25 +425,73 @@ async function handleConfirmAction(ctx, callbackData) {
 async function executeRelease(ctx, dealId) {
   try {
     // Import release service
-    const { EscrowService } = require('../../services/escrow/escrowService');
+    const { ReleaseService } = require('../../services/releaseService');
     
-    const result = await EscrowService.releaseFunds(dealId, ctx.from.id.toString());
+    await ctx.editMessageText('🔄 Processing release... Please wait.');
+    
+    const result = await ReleaseService.releaseFunds(dealId, ctx.from.id.toString());
     
     if (result.success) {
+      const { feeAmount, netAmount, sellerTxHash } = result;
+      
       await ctx.editMessageText(
         `✅ *Funds Released Successfully!*\n\n` +
-        `Transaction Hash: \`${result.transactionHash}\`\n` +
-        `Amount: ${result.amount} ${result.cryptocurrency}\n\n` +
-        `The seller will receive the funds shortly. ` +
-        `Thank you for using CoinEscrowPro! 🎉`
+        `🔗 **Seller Transaction:** \`${sellerTxHash}\`\n` +
+        `💰 **Amount to Seller:** ${netAmount} crypto\n` +
+        `⚡ **Platform Fee:** ${feeAmount} crypto\n\n` +
+        `🎉 Deal completed successfully!\n` +
+        `The seller will receive their funds shortly.\n\n` +
+        `Thank you for using CoinEscrowPro! 🚀`,
+        { parse_mode: 'Markdown' }
       );
+      
+      // Send notification to the group
+      const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        include: {
+          buyer: true,
+          seller: true,
+          group: true
+        }
+      });
+      
+      if (deal && deal.group) {
+        try {
+          await ctx.api.sendMessage(
+            deal.group.telegramId,
+            `🎉 *Deal Completed Successfully!*\n\n` +
+            `🆔 **Deal:** \`${deal.dealNumber}\`\n` +
+            `💰 **Amount:** ${deal.amount} ${deal.cryptocurrency}\n` +
+            `👤 **Buyer:** @${deal.buyer.username}\n` +
+            `👤 **Seller:** @${deal.seller.username}\n` +
+            `🔗 **Transaction:** \`${sellerTxHash}\`\n\n` +
+            `✅ Funds have been released to the seller.\n` +
+            `Both parties have gained +1 reputation! 🌟`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (notificationError) {
+          logger.warn('Could not send group notification:', notificationError);
+        }
+      }
+      
     } else {
-      await ctx.editMessageText(`❌ Release failed: ${result.error}`);
+      await ctx.editMessageText(
+        `❌ *Release Failed*\n\n` +
+        `Error: ${result.error}\n\n` +
+        `Please try again or contact support if the issue persists.`,
+        { parse_mode: 'Markdown' }
+      );
     }
 
   } catch (error) {
     logger.error('Error executing release:', error);
-    await ctx.editMessageText('❌ An error occurred during release. Please contact support.');
+    await ctx.editMessageText(
+      '❌ *System Error*\n\n' +
+      'An unexpected error occurred during release.\n' +
+      'Please contact support immediately.\n\n' +
+      'Your funds are safe in escrow.',
+      { parse_mode: 'Markdown' }
+    );
   }
 }
 
@@ -499,7 +547,7 @@ async function createDealGroup(ctx, crypto) {
     const otherPartyUsername = ctx.session.otherPartyUsername;
 
     // Create a temporary deal ID for the group
-    const tempDealId = `DEAL_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const tempDealId = Math.random().toString(36).substr(2, 5).toUpperCase();
 
     // Show loading message
     await ctx.editMessageText(`
@@ -677,7 +725,7 @@ Both parties can now join the clean group via invite links!
     logger.error('Error creating deal group:', error);
     
     // Fallback to manual instructions
-    const tempDealId = `DEAL_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const tempDealId = Math.random().toString(36).substr(2, 5).toUpperCase();
     await createManualDealGroup(ctx, tempDealId, ctx.from.username, ctx.session.otherPartyUsername, crypto);
   }
 }
@@ -686,7 +734,7 @@ Both parties can now join the clean group via invite links!
  * Fallback manual group creation
  */
 async function createManualDealGroup(ctx, tempDealId, username, otherPartyUsername, crypto) {
-  const groupTitle = `🔒 Escrow Deal #${tempDealId.slice(-6)} - ${crypto}`;
+  const groupTitle = `Escrow Pro #${tempDealId}`;
   
   const instructionText = `
 🔒 *Deal Setup Instructions*

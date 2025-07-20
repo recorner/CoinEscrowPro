@@ -47,7 +47,10 @@ bot.command('start', startHandler);
 // Deal management commands
 bot.command('help', dealHandlers.helpHandler);
 bot.command('rules', dealHandlers.rulesHandler);
+bot.command('terms', dealHandlers.termsHandler);
+bot.command('setterms', dealHandlers.setTermsHandler);
 bot.command('set', dealHandlers.setCryptoHandler);
+bot.command('amount', dealHandlers.amountHandler);
 bot.command('setwallet', walletHandlers.setWalletHandler);
 bot.command('wallet', walletHandlers.walletHandler);
 bot.command('release', dealHandlers.releaseHandler);
@@ -65,6 +68,13 @@ bot.command('whoami', dealHandlers.whoamiHandler);
 bot.command('admin', adminHandlers.adminPanelHandler);
 bot.command('broadcast', adminHandlers.broadcastHandler);
 bot.command('registergroup', adminHandlers.registerGroupHandler);
+bot.command('setpayout', adminHandlers.setPayoutWalletHandler);
+bot.command('listpayouts', adminHandlers.listPayoutWalletsHandler);
+bot.command('platformstats', adminHandlers.platformStatsHandler);
+bot.command('setgetblock', adminHandlers.setGetblockHandler);
+bot.command('setwebsocket', adminHandlers.setWebsocketHandler);
+bot.command('listsettings', adminHandlers.listSettingsHandler);
+bot.command('initdefaults', adminHandlers.initializeDefaultsHandler);
 
 // Deal joining command
 bot.command('joindeal', dealHandlers.joinDealHandler);
@@ -116,10 +126,10 @@ bot.on('my_chat_member', async (ctx) => {
       });
 
       // Automatically create a new deal for this group
-      const dealNumber = Math.random().toString(36).substr(2, 9).toUpperCase();
+      const dealNumber = Math.random().toString(36).substr(2, 5).toUpperCase();
       const newDeal = await prisma.deal.create({
         data: {
-          id: `DEAL_${Date.now()}_${dealNumber}`,
+          id: dealNumber, // Simple 5-character ID
           dealNumber: dealNumber,
           cryptocurrency: 'BTC', // Default to BTC, users can change with /set command
           amount: 0, // Will be set later
@@ -130,10 +140,29 @@ bot.on('my_chat_member', async (ctx) => {
         },
       });
 
+      // Update group title to match our format
+      const escrowGroupTitle = `Escrow Pro #${dealNumber}`;
+      
+      try {
+        // Try to update the group title
+        await ctx.api.setChatTitle(chat.id, escrowGroupTitle);
+        
+        // Update our database record with the new title
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { title: escrowGroupTitle }
+        });
+        
+        logger.info(`Updated group title to: ${escrowGroupTitle}`);
+      } catch (titleError) {
+        logger.warn(`Could not update group title: ${titleError.message}`);
+        // Continue anyway - not all groups allow title changes
+      }
+
       // Send welcome message to the group
       await ctx.api.sendMessage(chat.id, 
         `🤖 **CoinEscrowPro Bot Activated!**\n\n` +
-        `✅ Deal ID: \`${newDeal.id}\`\n` +
+        `✅ Deal ID: \`${newDeal.dealNumber}\`\n` +
         `💰 Default Cryptocurrency: ${newDeal.cryptocurrency}\n\n` +
         `**How to use:**\n` +
         `• Buyer: Send \`/buyer <your_address>\`\n` +
@@ -144,7 +173,7 @@ bot.on('my_chat_member', async (ctx) => {
         { parse_mode: 'Markdown' }
       );
 
-      logger.info(`Created new deal ${newDeal.id} for group ${chat.title}`);
+      logger.info(`Created new deal ${newDeal.dealNumber} for group ${escrowGroupTitle}`);
       
     } catch (error) {
       logger.error('Error saving group info or creating deal:', error);
@@ -261,6 +290,10 @@ async function handleAwaitingInput(ctx, messageText) {
         await handleUsernameInput(ctx, messageText);
         break;
       
+      case 'custom_terms':
+        await handleCustomTermsInput(ctx, messageText);
+        break;
+      
       default:
         logger.warn(`Unknown awaiting input type: ${awaitingType}`);
         ctx.session.awaitingInput = null;
@@ -313,6 +346,61 @@ Now choose the cryptocurrency for your escrow deal:
 
   // Clear awaiting input
   ctx.session.awaitingInput = null;
+}
+
+/**
+ * Handle custom terms input for deals
+ */
+async function handleCustomTermsInput(ctx, messageText) {
+  try {
+    // Basic validation
+    if (!messageText || messageText.trim().length < 10) {
+      await ctx.reply('❌ Terms must be at least 10 characters long. Please try again.');
+      return;
+    }
+
+    if (messageText.length > 1000) {
+      await ctx.reply('❌ Terms must be under 1000 characters. Please try again.');
+      return;
+    }
+
+    const dealId = ctx.session.dealId;
+    if (!dealId) {
+      await ctx.reply('❌ No deal ID found. Please try the /setterms command again.');
+      ctx.session.awaitingInput = null;
+      return;
+    }
+
+    // Update the deal with custom terms
+    const updatedDeal = await prisma.deal.update({
+      where: { id: dealId },
+      data: { customTerms: messageText.trim() },
+      include: {
+        buyer: true,
+        seller: true
+      }
+    });
+
+    await ctx.reply(
+      `✅ *Custom Terms Set Successfully*\n\n` +
+      `🆔 **Deal:** \`${updatedDeal.dealNumber}\`\n\n` +
+      `📝 **Terms:**\n${messageText.trim()}\n\n` +
+      `💡 Both parties can now review these terms using /terms`,
+      { parse_mode: 'Markdown' }
+    );
+
+    // Clear session
+    ctx.session.awaitingInput = null;
+    ctx.session.dealId = null;
+
+    logger.info(`Custom terms set for deal ${updatedDeal.dealNumber} by user ${ctx.from.id}`);
+
+  } catch (error) {
+    logger.error('Error handling custom terms input:', error);
+    await ctx.reply('❌ An error occurred while setting terms. Please try again.');
+    ctx.session.awaitingInput = null;
+    ctx.session.dealId = null;
+  }
 }
 
 // Initialize the bot

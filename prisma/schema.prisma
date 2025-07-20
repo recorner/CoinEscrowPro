@@ -57,6 +57,7 @@ model Deal {
   sellerUsername    String?
   escrowAddress     String?
   escrowPrivateKey  String?     // Encrypted
+  customTerms       String?     // Custom terms set by participants
   timeoutMinutes    Int         @default(60)
   expiresAt         DateTime?
   confirmationsReq  Int         @default(1)
@@ -84,6 +85,30 @@ model Deal {
   referralGroup     ReferralGroup? @relation(fields: [referralGroupId], references: [id])
 
   @@map("deals")
+}
+
+model PayoutWallet {
+  id             String     @id @default(uuid())
+  cryptocurrency CryptoType @unique
+  address        String
+  label          String?
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@map("payout_wallets")
+}
+
+model AdminSettings {
+  id                    String   @id @default(uuid())
+  key                   String   @unique
+  value                 String
+  description           String?
+  isEncrypted          Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("admin_settings")
 }
 
 model Wallet {
@@ -289,4 +314,16 @@ enum ReportStatus {
   INVESTIGATING
   RESOLVED
   DISMISSED
+}
+
+model AdminConfig {
+  id              String     @id @default(uuid())
+  key             String     @unique
+  value           String
+  description     String?
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@map("admin_config")
 }

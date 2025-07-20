@@ -307,7 +307,7 @@ class MTProtoService {
       }
 
       // Create group with only the bot initially
-      const groupTitle = `🔒 Escrow Deal #${dealId.slice(-6)} - ${crypto}`;
+      const groupTitle = `Escrow Pro #${dealId}`;
       
       // Create group first (empty)
       const groupResult = await this.createGroup(groupTitle, []);

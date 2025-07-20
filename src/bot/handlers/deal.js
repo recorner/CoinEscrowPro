@@ -17,19 +17,30 @@ class DealHandlers {
 • \`/start\` - Start the bot and main menu
 • \`/help\` - Show this help message
 • \`/set btc|ltc\` - Set cryptocurrency for deal
+• \`/amount <value>\` - Set deal amount
 • \`/setwallet <address>\` - Set your wallet address
 • \`/wallet\` - Show current wallet address
 • \`/release\` - Release escrow funds (buyer only)
 • \`/cancel\` - Cancel current deal
 • \`/dispute\` - Open dispute with admin
 • \`/extend\` - Extend deal timeout
-• \`/balance\` - Check escrow status
+• \`/balance\` - Check escrow balance and status
 • \`/whoami\` - Show your role in current deal
+
+*Terms & Rules:*
+• \`/terms\` - View current deal terms
+• \`/setterms\` - Set custom terms for deal
+• \`/rules\` - View platform rules
 
 *Information:*
 • \`/botstats\` - Show bot statistics
 • \`/vouch\` - Post success story
 • \`/report <message>\` - Report user/issue
+
+*Platform Fees:*
+• Deals under $100: $5 flat fee
+• Deals over $100: 5% of total amount
+• Fees are automatically deducted on release
 
 *Need more help?* Contact @CoinEscrowProSupport
     `;
@@ -138,18 +149,18 @@ class DealHandlers {
       // Find the deal
       const deal = await prisma.deal.findFirst({
         where: {
-          groupId: chat.id.toString(),
+          group: {
+            telegramId: chat.id.toString()
+          },
           status: 'FUNDED',
-          buyerId: (await getUserId(userId)),
+          buyer: {
+            telegramId: userId
+          }
         },
         include: {
           buyer: true,
           seller: true,
-          wallets: {
-            include: {
-              wallet: true,
-            },
-          },
+          group: true,
         },
       });
 
@@ -157,12 +168,32 @@ class DealHandlers {
         return ctx.reply('❌ No funded deal found or you are not the buyer.');
       }
 
-      // Confirm release
+      // Get seller's wallet address
+      const sellerWallet = await prisma.wallet.findFirst({
+        where: {
+          userId: deal.sellerId,
+          cryptocurrency: deal.cryptocurrency,
+          isActive: true
+        }
+      });
+
+      if (!sellerWallet) {
+        return ctx.reply('❌ Seller has not set a wallet address yet. Please ask them to use /setwallet command.');
+      }
+
+      // Calculate fees
+      const { feeAmount, netAmount } = calculateFees(deal.amount);
+
+      // Confirm release with fee breakdown
       await ctx.reply(
         `🔐 *Release Confirmation*\n\n` +
         `Deal: \`${deal.dealNumber}\`\n` +
-        `Amount: ${deal.amount} ${deal.cryptocurrency}\n` +
-        `Seller: @${deal.seller.username}\n\n` +
+        `Total Amount: ${deal.amount} ${deal.cryptocurrency}\n` +
+        `Platform Fee: ${feeAmount} ${deal.cryptocurrency}\n` +
+        `Amount to Seller: ${netAmount} ${deal.cryptocurrency}\n` +
+        `Seller: @${deal.seller.username}\n` +
+        `Seller Address: \`${sellerWallet.address}\`\n\n` +
+        `⚠️ **This action cannot be undone!**\n` +
         `Are you sure you want to release the funds?`,
         {
           parse_mode: 'Markdown',
@@ -401,14 +432,17 @@ class DealHandlers {
     try {
       const deal = await prisma.deal.findFirst({
         where: {
-          groupId: chat.id.toString(),
+          group: {
+            telegramId: chat.id.toString()
+          },
           status: {
-            in: ['PENDING', 'WAITING_PAYMENT', 'FUNDED'],
+            in: ['PENDING', 'WAITING_PAYMENT', 'FUNDED', 'DISPUTED'],
           },
         },
         include: {
           buyer: true,
           seller: true,
+          group: true,
           transactions: true,
         },
       });
@@ -421,6 +455,7 @@ class DealHandlers {
         PENDING: '⏳',
         WAITING_PAYMENT: '💰',
         FUNDED: '✅',
+        DISPUTED: '⚠️',
       };
 
       let balanceText = `
@@ -429,14 +464,41 @@ class DealHandlers {
 ${statusEmojis[deal.status]} **Status:** ${deal.status}
 🆔 **Deal:** \`${deal.dealNumber}\`
 💰 **Amount:** ${deal.amount} ${deal.cryptocurrency}
-⚡ **Fee:** ${deal.feeAmount} ${deal.cryptocurrency} (${deal.feePercentage}%)
-
-👤 **Buyer:** @${deal.buyer.username}
-👤 **Seller:** @${deal.seller.username}
       `;
 
+      // Add buyer/seller info if available
+      if (deal.buyer) {
+        balanceText += `\n👤 **Buyer:** @${deal.buyer.username}`;
+      }
+      if (deal.seller) {
+        balanceText += `\n👤 **Seller:** @${deal.seller.username}`;
+      }
+
+      // Check actual escrow balance if address exists
       if (deal.escrowAddress) {
         balanceText += `\n🏦 **Escrow Address:** \`${deal.escrowAddress}\``;
+        
+        try {
+          const { WalletService } = require('../../services/wallet/walletService');
+          const balanceResult = await WalletService.getAddressBalance(deal.escrowAddress, deal.cryptocurrency);
+          
+          if (balanceResult.success) {
+            balanceText += `\n💎 **Escrow Balance:** ${balanceResult.balance} ${deal.cryptocurrency}`;
+            if (balanceResult.unconfirmed > 0) {
+              balanceText += `\n⏳ **Unconfirmed:** ${balanceResult.unconfirmed} ${deal.cryptocurrency}`;
+            }
+          }
+        } catch (balanceError) {
+          logger.warn('Could not fetch escrow balance:', balanceError);
+          balanceText += `\n💎 **Escrow Balance:** Checking...`;
+        }
+      }
+
+      // Calculate and show fees
+      if (deal.amount > 0) {
+        const { feeAmount, feePercentage } = calculateFees(deal.amount);
+        balanceText += `\n⚡ **Platform Fee:** ${feeAmount} ${deal.cryptocurrency} (${feePercentage}%)`;
+        balanceText += `\n💵 **You'll Receive:** ${(deal.amount - feeAmount).toFixed(8)} ${deal.cryptocurrency}`;
       }
 
       if (deal.expiresAt) {
@@ -632,7 +694,7 @@ ${role === 'Buyer' ? '💡 As buyer, you can release funds when satisfied.' : '�
 
 Usage: /joindeal DEAL_ID
 
-Example: /joindeal DEAL_1721443037_abc123
+Example: /joindeal A1B2C
 
 Ask the other party to share the correct deal ID with you.
         `, { parse_mode: 'Markdown' });
@@ -685,6 +747,196 @@ Ask the other party to share the correct deal ID with you.
       await ctx.reply('❌ An error occurred. Please try again.');
     }
   }
+
+  static async termsHandler(ctx) {
+    try {
+      const chat = ctx.chat;
+      
+      if (chat.type === 'private') {
+        return ctx.reply('❌ This command can only be used in a deal group.');
+      }
+
+      // Get deal for this group
+      const deal = await prisma.deal.findFirst({
+        where: {
+          group: {
+            telegramId: chat.id.toString()
+          }
+        },
+        include: {
+          buyer: true,
+          seller: true,
+          group: true
+        }
+      });
+
+      if (!deal) {
+        return ctx.reply('❌ No deal found in this group.');
+      }
+
+      // Show current terms
+      let termsText = `📋 *Deal Terms*\n\n`;
+      termsText += `🆔 **Deal ID:** \`${deal.dealNumber}\`\n`;
+      
+      if (deal.customTerms) {
+        termsText += `\n📝 **Custom Terms:**\n${deal.customTerms}\n`;
+      } else {
+        termsText += `\n📝 **Default Terms:**\n`;
+        termsText += `• Buyer must fund escrow address within 24 hours\n`;
+        termsText += `• Seller must deliver goods/services as agreed\n`;
+        termsText += `• Buyer releases funds upon satisfaction\n`;
+        termsText += `• Platform fee: $5 (deals under $100) or 5% (deals over $100)\n`;
+        termsText += `• Disputes resolved by platform admin\n`;
+      }
+
+      termsText += `\n\n💡 *To set custom terms, use:* /setterms`;
+
+      await ctx.reply(termsText, { parse_mode: 'Markdown' });
+
+    } catch (error) {
+      logger.error('Error in terms handler:', error);
+      await ctx.reply('❌ An error occurred. Please try again.');
+    }
+  }
+
+  static async setTermsHandler(ctx) {
+    try {
+      const userId = ctx.from.id.toString();
+      const chat = ctx.chat;
+      
+      if (chat.type === 'private') {
+        return ctx.reply('❌ This command can only be used in a deal group.');
+      }
+
+      // Get deal for this group
+      const deal = await prisma.deal.findFirst({
+        where: {
+          group: {
+            telegramId: chat.id.toString()
+          },
+          status: 'PENDING'
+        },
+        include: {
+          buyer: true,
+          seller: true,
+          group: true
+        }
+      });
+
+      if (!deal) {
+        return ctx.reply('❌ No pending deal found in this group.');
+      }
+
+      // Check if user is part of the deal
+      const userDbId = await getUserId(userId);
+      if (deal.buyerId !== userDbId && deal.sellerId !== userDbId) {
+        return ctx.reply('❌ Only deal participants can set terms.');
+      }
+
+      await ctx.reply(
+        `📝 *Set Custom Terms*\n\n` +
+        `Please send your custom terms for this deal.\n\n` +
+        `**Current Deal:** \`${deal.dealNumber}\`\n` +
+        `**Your Role:** ${deal.buyerId === userDbId ? 'Buyer' : 'Seller'}\n\n` +
+        `*Type your terms below:*`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Set awaiting state
+      ctx.session.awaitingInput = 'custom_terms';
+      ctx.session.dealId = deal.id;
+
+    } catch (error) {
+      logger.error('Error in set terms handler:', error);
+      await ctx.reply('❌ An error occurred. Please try again.');
+    }
+  }
+
+  static async amountHandler(ctx) {
+    try {
+      const amount = parseFloat(ctx.match);
+      const chat = ctx.chat;
+      
+      if (chat.type === 'private') {
+        return ctx.reply('❌ This command can only be used in a deal group.');
+      }
+
+      if (!amount || amount <= 0) {
+        return ctx.reply('❌ Please provide a valid amount. Example: /amount 0.5');
+      }
+
+      // Get deal for this group
+      const deal = await prisma.deal.findFirst({
+        where: {
+          group: {
+            telegramId: chat.id.toString()
+          },
+          status: 'PENDING'
+        },
+        include: {
+          buyer: true,
+          seller: true,
+          group: true
+        }
+      });
+
+      if (!deal) {
+        return ctx.reply('❌ No pending deal found in this group.');
+      }
+
+      // Update deal amount
+      await prisma.deal.update({
+        where: { id: deal.id },
+        data: { amount: amount }
+      });
+
+      // Calculate fees
+      const { feeAmount, netAmount } = calculateFees(amount);
+
+      await ctx.reply(
+        `💰 *Deal Amount Updated*\n\n` +
+        `🆔 **Deal:** \`${deal.dealNumber}\`\n` +
+        `💵 **Amount:** ${amount} ${deal.cryptocurrency}\n` +
+        `⚡ **Platform Fee:** ${feeAmount} ${deal.cryptocurrency}\n` +
+        `💎 **Net to Seller:** ${netAmount} ${deal.cryptocurrency}\n\n` +
+        `✅ Amount has been set successfully!`,
+        { parse_mode: 'Markdown' }
+      );
+
+      logger.info(`Amount set for deal ${deal.dealNumber}: ${amount} ${deal.cryptocurrency}`);
+
+    } catch (error) {
+      logger.error('Error in amount handler:', error);
+      await ctx.reply('❌ An error occurred. Please try again.');
+    }
+  }
+}
+
+/**
+ * Calculate platform fees based on deal amount
+ * $5 for deals under $100, 5% for deals over $100
+ */
+function calculateFees(amount) {
+  let feeAmount;
+  let feePercentage;
+
+  if (amount < 100) {
+    // $5 flat fee for deals under $100
+    feeAmount = 5;
+    feePercentage = ((5 / amount) * 100).toFixed(2);
+  } else {
+    // 5% fee for deals over $100
+    feeAmount = amount * 0.05;
+    feePercentage = 5;
+  }
+
+  const netAmount = amount - feeAmount;
+
+  return {
+    feeAmount: parseFloat(feeAmount.toFixed(8)),
+    netAmount: parseFloat(netAmount.toFixed(8)),
+    feePercentage: parseFloat(feePercentage)
+  };
 }
 
 async function getUserId(telegramId) {
@@ -692,6 +944,33 @@ async function getUserId(telegramId) {
     where: { telegramId: telegramId.toString() },
   });
   return user?.id;
+}
+
+/**
+ * Calculate platform fees based on deal amount
+ * $5 for deals under $100, 5% for deals over $100
+ */
+function calculateFees(amount) {
+  let feeAmount;
+  let feePercentage;
+
+  if (amount < 100) {
+    // $5 flat fee for deals under $100
+    feeAmount = 5;
+    feePercentage = ((5 / amount) * 100).toFixed(2);
+  } else {
+    // 5% fee for deals over $100
+    feeAmount = amount * 0.05;
+    feePercentage = 5;
+  }
+
+  const netAmount = amount - feeAmount;
+
+  return {
+    feeAmount: parseFloat(feeAmount.toFixed(8)),
+    netAmount: parseFloat(netAmount.toFixed(8)),
+    feePercentage: parseFloat(feePercentage)
+  };
 }
 
 module.exports = { dealHandlers: DealHandlers };

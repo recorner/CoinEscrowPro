@@ -1,12 +1,8 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { logger } = require('../../utils/logger');
-
-// Getblock.io API endpoints
-const GETBLOCK_ENDPOINTS = {
-  BTC: 'https://go.getblock.io/e09a873de73f402b9ed2b55809977aa8',
-  LTC: 'https://go.getblock.io/0a50cc0961b044dd8a65246c3808872e'
-};
+const { AdminSettingsService } = require('../admin/settingsService');
+const { CryptoKeyService } = require('../crypto/keyService');
 
 class WalletService {
   static async generateEscrowAddress(cryptocurrency) {
@@ -26,14 +22,28 @@ class WalletService {
 
   static async generateBitcoinAddress() {
     try {
-      // For now, just generate mock addresses since Getblock.io API needs proper setup
-      // In production, you'd need proper API authentication and wallet setup
-      logger.info('Generating Bitcoin address using mock generator (Getblock.io needs proper setup)');
-      return this.generateMockAddress('BTC');
+      // Get current Getblock.io endpoint from admin settings
+      const endpoints = await AdminSettingsService.getGetblockEndpoints();
+      
+      // Generate private key locally
+      const privateKey = CryptoKeyService.generatePrivateKey();
+      
+      // For now, use mock address generation since Getblock.io doesn't provide key generation
+      // In production, you'd use bitcoinjs-lib or similar library
+      logger.info('Generating Bitcoin address using mock generator (integrate with proper Bitcoin library)');
+      const mockResult = this.generateMockAddress('BTC');
+      
+      // Encrypt the private key
+      const encryptedPrivateKey = CryptoKeyService.encryptPrivateKey(privateKey);
+      
+      return {
+        ...mockResult,
+        privateKey: encryptedPrivateKey
+      };
 
       /* 
-      // Uncomment and configure when Getblock.io is properly set up
-      const response = await axios.post(GETBLOCK_ENDPOINTS.BTC, {
+      // Uncomment and configure when using a proper Bitcoin library
+      const response = await axios.post(endpoints.btc, {
         jsonrpc: '2.0',
         method: 'getnewaddress',
         params: ['escrow', 'bech32'],
@@ -41,7 +51,6 @@ class WalletService {
       }, {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer YOUR_API_KEY' // Add proper auth if needed
         },
         timeout: 10000
       });
@@ -76,13 +85,27 @@ class WalletService {
 
   static async generateLitecoinAddress() {
     try {
-      // For now, just generate mock addresses since Getblock.io API needs proper setup
-      logger.info('Generating Litecoin address using mock generator (Getblock.io needs proper setup)');
-      return this.generateMockAddress('LTC');
+      // Get current Getblock.io endpoint from admin settings
+      const endpoints = await AdminSettingsService.getGetblockEndpoints();
+      
+      // Generate private key locally
+      const privateKey = CryptoKeyService.generatePrivateKey();
+      
+      // For now, use mock address generation
+      logger.info('Generating Litecoin address using mock generator (integrate with proper Litecoin library)');
+      const mockResult = this.generateMockAddress('LTC');
+      
+      // Encrypt the private key
+      const encryptedPrivateKey = CryptoKeyService.encryptPrivateKey(privateKey);
+      
+      return {
+        ...mockResult,
+        privateKey: encryptedPrivateKey
+      };
 
       /*
-      // Uncomment and configure when Getblock.io is properly set up
-      const response = await axios.post(GETBLOCK_ENDPOINTS.LTC, {
+      // Uncomment and configure when using a proper Litecoin library
+      const response = await axios.post(endpoints.ltc, {
         jsonrpc: '2.0',
         method: 'getnewaddress',
         params: ['escrow'],
@@ -345,6 +368,147 @@ class WalletService {
     } catch (error) {
       logger.error(`Error sending transaction:`, error);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get address balance
+   */
+  static async getAddressBalance(address, cryptocurrency) {
+    try {
+      // Mock implementation for now
+      logger.info(`Getting balance for ${cryptocurrency} address: ${address}`);
+      
+      // Generate a realistic mock balance
+      const mockBalance = Math.random() * 0.1 + 0.01; // Between 0.01 and 0.11
+      const mockUnconfirmed = Math.random() < 0.3 ? Math.random() * 0.01 : 0; // 30% chance of unconfirmed
+
+      return {
+        success: true,
+        balance: parseFloat(mockBalance.toFixed(8)),
+        unconfirmed: parseFloat(mockUnconfirmed.toFixed(8)),
+        address: address
+      };
+
+      /* 
+      // Real implementation for Getblock.io
+      const endpoint = GETBLOCK_ENDPOINTS[cryptocurrency];
+      if (!endpoint) {
+        throw new Error(`Unsupported cryptocurrency: ${cryptocurrency}`);
+      }
+
+      // For Bitcoin-like cryptocurrencies, we need to call getreceivedbyaddress
+      const response = await axios.post(endpoint, {
+        jsonrpc: '2.0',
+        method: 'getreceivedbyaddress',
+        params: [address, 1], // 1 confirmation minimum
+        id: Date.now()
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      if (response.data.error) {
+        throw new Error(`Getblock.io error: ${response.data.error.message}`);
+      }
+
+      return {
+        success: true,
+        balance: response.data.result,
+        unconfirmed: 0, // Would need separate call for unconfirmed
+        address: address
+      };
+      */
+
+    } catch (error) {
+      logger.error(`Error getting address balance:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Send transaction
+   */
+  static async sendTransaction({ fromAddress, toAddress, amount, cryptocurrency, privateKey }) {
+    try {
+      logger.info(`Sending ${amount} ${cryptocurrency} from ${fromAddress} to ${toAddress}`);
+      
+      // Mock implementation for now
+      const mockTxHash = crypto.randomBytes(32).toString('hex');
+      
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      return {
+        success: true,
+        txHash: mockTxHash,
+        amount: amount,
+        cryptocurrency: cryptocurrency,
+        fromAddress: fromAddress,
+        toAddress: toAddress
+      };
+
+      /* 
+      // Real implementation for Getblock.io
+      const endpoint = GETBLOCK_ENDPOINTS[cryptocurrency];
+      if (!endpoint) {
+        throw new Error(`Unsupported cryptocurrency: ${cryptocurrency}`);
+      }
+
+      // This would require importing the private key to the wallet first
+      // Then calling sendtoaddress or similar method
+      const response = await axios.post(endpoint, {
+        jsonrpc: '2.0',
+        method: 'sendtoaddress',
+        params: [toAddress, amount],
+        id: Date.now()
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      });
+
+      if (response.data.error) {
+        throw new Error(`Getblock.io error: ${response.data.error.message}`);
+      }
+
+      return {
+        success: true,
+        txHash: response.data.result,
+        amount: amount,
+        cryptocurrency: cryptocurrency,
+        fromAddress: fromAddress,
+        toAddress: toAddress
+      };
+      */
+
+    } catch (error) {
+      logger.error(`Error sending transaction:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Validate cryptocurrency address
+   */
+  static validateAddress(address, cryptocurrency) {
+    try {
+      if (cryptocurrency === 'BTC') {
+        // Bitcoin address validation (basic)
+        const btcRegex = /^([13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})$/;
+        return btcRegex.test(address);
+      } else if (cryptocurrency === 'LTC') {
+        // Litecoin address validation (basic)
+        const ltcRegex = /^([LM3][a-km-zA-HJ-NP-Z1-9]{26,33}|ltc1[a-z0-9]{39,59})$/;
+        return ltcRegex.test(address);
+      }
+      return false;
+    } catch (error) {
+      logger.error('Error validating address:', error);
+      return false;
     }
   }
 }
