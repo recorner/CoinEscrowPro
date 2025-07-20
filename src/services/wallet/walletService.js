@@ -1,8 +1,15 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const bitcoin = require('bitcoinjs-lib');
+const ecc = require('@bitcoinerlab/secp256k1');
+const ECPair = require('ecpair').ECPairFactory(ecc);
+const bs58check = require('bs58check').default;
 const { logger } = require('../../utils/logger');
 const { AdminSettingsService } = require('../admin/settingsService');
 const { CryptoKeyService } = require('../crypto/keyService');
+
+// Initialize bitcoinjs-lib with ecc
+bitcoin.initEccLib(ecc);
 
 class WalletService {
   static async generateEscrowAddress(cryptocurrency) {
@@ -22,127 +29,97 @@ class WalletService {
 
   static async generateBitcoinAddress() {
     try {
-      // Get current Getblock.io endpoint from admin settings
-      const endpoints = await AdminSettingsService.getGetblockEndpoints();
+      // Generate cryptographically secure private key
+      const privateKeyBuffer = crypto.randomBytes(32);
+      const privateKeyHex = privateKeyBuffer.toString('hex');
       
-      // Generate private key locally
-      const privateKey = CryptoKeyService.generatePrivateKey();
+      // Generate public key from private key using secp256k1
+      const publicKeyBuffer = ecc.pointFromScalar(privateKeyBuffer, true);
       
-      // For now, use mock address generation since Getblock.io doesn't provide key generation
-      // In production, you'd use bitcoinjs-lib or similar library
-      logger.info('Generating Bitcoin address using mock generator (integrate with proper Bitcoin library)');
-      const mockResult = this.generateMockAddress('BTC');
+      // Create Bitcoin address using proper Base58Check encoding
+      // Step 1: SHA256 of public key
+      const hash1 = crypto.createHash('sha256').update(publicKeyBuffer).digest();
+      
+      // Step 2: RIPEMD160 of result
+      const hash2 = crypto.createHash('ripemd160').update(hash1).digest();
+      
+      // Step 3: Add version byte (0x00 for Bitcoin mainnet P2PKH)
+      const versionedHash = Buffer.concat([Buffer.from([0x00]), hash2]);
+      
+      // Step 4: Base58Check encode
+      const address = bs58check.encode(versionedHash);
+      
+      // Create WIF format private key
+      const privateKeyWIF = bs58check.encode(Buffer.concat([
+        Buffer.from([0x80]), // Bitcoin mainnet private key version
+        privateKeyBuffer,
+        Buffer.from([0x01])  // Compressed public key flag
+      ]));
       
       // Encrypt the private key
-      const encryptedPrivateKey = CryptoKeyService.encryptPrivateKey(privateKey);
+      const encryptedPrivateKey = CryptoKeyService.encryptPrivateKey(privateKeyHex);
       
-      return {
-        ...mockResult,
-        privateKey: encryptedPrivateKey
-      };
-
-      /* 
-      // Uncomment and configure when using a proper Bitcoin library
-      const response = await axios.post(endpoints.btc, {
-        jsonrpc: '2.0',
-        method: 'getnewaddress',
-        params: ['escrow', 'bech32'],
-        id: Date.now()
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000
-      });
-
-      if (response.data.error) {
-        throw new Error(`Getblock.io BTC error: ${response.data.error.message}`);
-      }
-
-      const address = response.data.result;
+      logger.info(`Generated real Bitcoin address: ${address}`);
       
-      // Generate a mock private key (in production, you'd get this from a secure wallet)
-      const privateKey = crypto.randomBytes(32).toString('hex');
-      const encryptedPrivateKey = this.encryptPrivateKey(privateKey);
-
-      logger.info(`Generated Bitcoin address via Getblock.io: ${address}`);
-
       return {
         success: true,
         address: address,
-        privateKey: privateKey,
+        privateKey: privateKeyHex,
+        privateKeyWIF: privateKeyWIF,
         encryptedPrivateKey: encryptedPrivateKey
       };
-      */
 
     } catch (error) {
-      logger.error('Error generating Bitcoin address via Getblock.io:', error);
-      
-      // Fallback to generating a mock address for testing
-      return this.generateMockAddress('BTC');
+      logger.error('Error generating Bitcoin address:', error);
+      return { success: false, error: error.message };
     }
   }
 
   static async generateLitecoinAddress() {
     try {
-      // Get current Getblock.io endpoint from admin settings
-      const endpoints = await AdminSettingsService.getGetblockEndpoints();
+      // Generate cryptographically secure private key
+      const privateKeyBuffer = crypto.randomBytes(32);
+      const privateKeyHex = privateKeyBuffer.toString('hex');
       
-      // Generate private key locally
-      const privateKey = CryptoKeyService.generatePrivateKey();
+      // Generate public key from private key using secp256k1
+      const publicKeyBuffer = ecc.pointFromScalar(privateKeyBuffer, true);
       
-      // For now, use mock address generation
-      logger.info('Generating Litecoin address using mock generator (integrate with proper Litecoin library)');
-      const mockResult = this.generateMockAddress('LTC');
+      // Create Litecoin address using proper Base58Check encoding
+      // Step 1: SHA256 of public key
+      const hash1 = crypto.createHash('sha256').update(publicKeyBuffer).digest();
+      
+      // Step 2: RIPEMD160 of result
+      const hash2 = crypto.createHash('ripemd160').update(hash1).digest();
+      
+      // Step 3: Add version byte (0x30 for Litecoin mainnet P2PKH)
+      const versionedHash = Buffer.concat([Buffer.from([0x30]), hash2]);
+      
+      // Step 4: Base58Check encode
+      const address = bs58check.encode(versionedHash);
+      
+      // Create WIF format private key for Litecoin
+      const privateKeyWIF = bs58check.encode(Buffer.concat([
+        Buffer.from([0xb0]), // Litecoin mainnet private key version
+        privateKeyBuffer,
+        Buffer.from([0x01])  // Compressed public key flag
+      ]));
       
       // Encrypt the private key
-      const encryptedPrivateKey = CryptoKeyService.encryptPrivateKey(privateKey);
+      const encryptedPrivateKey = CryptoKeyService.encryptPrivateKey(privateKeyHex);
       
-      return {
-        ...mockResult,
-        privateKey: encryptedPrivateKey
-      };
-
-      /*
-      // Uncomment and configure when using a proper Litecoin library
-      const response = await axios.post(endpoints.ltc, {
-        jsonrpc: '2.0',
-        method: 'getnewaddress',
-        params: ['escrow'],
-        id: Date.now()
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer YOUR_API_KEY' // Add proper auth if needed
-        },
-        timeout: 10000
-      });
-
-      if (response.data.error) {
-        throw new Error(`Getblock.io LTC error: ${response.data.error.message}`);
-      }
-
-      const address = response.data.result;
+      logger.info(`Generated real Litecoin address: ${address}`);
       
-      // Generate a mock private key (in production, you'd get this from a secure wallet)
-      const privateKey = crypto.randomBytes(32).toString('hex');
-      const encryptedPrivateKey = this.encryptPrivateKey(privateKey);
-
-      logger.info(`Generated Litecoin address via Getblock.io: ${address}`);
-
       return {
         success: true,
         address: address,
-        privateKey: privateKey,
+        privateKey: privateKeyHex,
+        privateKeyWIF: privateKeyWIF,
         encryptedPrivateKey: encryptedPrivateKey
       };
-      */
 
     } catch (error) {
-      logger.error('Error generating Litecoin address via Getblock.io:', error);
-      
-      // Fallback to generating a mock address for testing
-      return this.generateMockAddress('LTC');
+      logger.error('Error generating Litecoin address:', error);
+      return { success: false, error: error.message };
     }
   }
 
@@ -321,52 +298,179 @@ class WalletService {
     }
   }
 
-  // Send transaction using Getblock.io
-  static async sendTransaction(fromAddress, toAddress, amount, privateKey, cryptocurrency) {
+  // Send Bitcoin transaction using real transaction building
+  static async sendBitcoinTransaction(fromAddress, toAddress, amount, privateKeyHex) {
     try {
-      // For now, return mock transaction hash since Getblock.io API needs proper setup
-      logger.info(`Sending transaction from ${fromAddress} to ${toAddress} (using mock - Getblock.io needs proper setup)`);
+      // Convert amount to satoshis (Bitcoin base unit)
+      const satoshis = Math.floor(amount * 100000000);
       
-      const mockTxHash = crypto.randomBytes(32).toString('hex');
+      // Get UTXOs for the from address using Getblock.io
+      const utxos = await this.getUTXOs(fromAddress, 'BTC');
+      if (!utxos.success) {
+        throw new Error('Failed to get UTXOs: ' + utxos.error);
+      }
+      
+      // Calculate total available and required amount
+      const totalAvailable = utxos.utxos.reduce((sum, utxo) => sum + utxo.value, 0);
+      const fee = 1000; // 1000 satoshis fee (adjust based on network conditions)
+      const required = satoshis + fee;
+      
+      if (totalAvailable < required) {
+        throw new Error(`Insufficient balance. Available: ${totalAvailable}, Required: ${required}`);
+      }
+      
+      // Create transaction
+      const psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
+      
+      // Add inputs
+      let inputValue = 0;
+      for (const utxo of utxos.utxos) {
+        if (inputValue >= required) break;
+        
+        psbt.addInput({
+          hash: utxo.txid,
+          index: utxo.vout,
+          witnessUtxo: {
+            script: Buffer.from(utxo.scriptPubKey, 'hex'),
+            value: utxo.value,
+          },
+        });
+        inputValue += utxo.value;
+      }
+      
+      // Add output to recipient
+      psbt.addOutput({
+        address: toAddress,
+        value: satoshis,
+      });
+      
+      // Add change output if needed
+      const change = inputValue - required;
+      if (change > 0) {
+        psbt.addOutput({
+          address: fromAddress,
+          value: change,
+        });
+      }
+      
+      // Sign transaction
+      const keyPair = ECPair.fromPrivateKey(Buffer.from(privateKeyHex, 'hex'));
+      psbt.signAllInputs(keyPair);
+      psbt.finalizeAllInputs();
+      
+      // Get raw transaction
+      const rawTx = psbt.extractTransaction().toHex();
+      
+      // Broadcast transaction
+      const broadcastResult = await this.broadcastTransaction(rawTx, 'BTC');
+      if (!broadcastResult.success) {
+        throw new Error('Failed to broadcast transaction: ' + broadcastResult.error);
+      }
+      
+      logger.info(`Bitcoin transaction sent successfully: ${broadcastResult.txHash}`);
       
       return {
         success: true,
-        txHash: mockTxHash
+        txHash: broadcastResult.txHash,
+        fee: fee,
+        rawTx: rawTx
       };
+      
+    } catch (error) {
+      logger.error('Error sending Bitcoin transaction:', error);
+      return { success: false, error: error.message };
+    }
+  }
 
-      /*
-      // Uncomment when Getblock.io is properly configured  
-      const endpoint = GETBLOCK_ENDPOINTS[cryptocurrency];
-      if (!endpoint) {
-        throw new Error(`Unsupported cryptocurrency: ${cryptocurrency}`);
-      }
+  // Send Litecoin transaction (similar to Bitcoin)
+  static async sendLitecoinTransaction(fromAddress, toAddress, amount, privateKeyHex) {
+    try {
+      // Similar implementation to Bitcoin but with Litecoin network parameters
+      logger.info(`Sending Litecoin transaction from ${fromAddress} to ${toAddress}`);
+      
+      // For now, return a mock transaction since full Litecoin implementation needs more setup
+      const mockTxHash = crypto.randomBytes(32).toString('hex');
+      
+      logger.warn('Using mock Litecoin transaction - implement full Litecoin support');
+      
+      return {
+        success: true,
+        txHash: mockTxHash,
+        fee: 100000, // 0.001 LTC fee
+        note: 'Mock transaction - implement full Litecoin support'
+      };
+      
+    } catch (error) {
+      logger.error('Error sending Litecoin transaction:', error);
+      return { success: false, error: error.message };
+    }
+  }
 
-      // This is a simplified example - in production you'd need proper transaction building
-      const response = await axios.post(endpoint, {
-        jsonrpc: '2.0',
-        method: 'sendtoaddress',
-        params: [toAddress, amount],
-        id: Date.now()
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer YOUR_API_KEY' // Add proper auth if needed
+  // Get UTXOs for an address
+  static async getUTXOs(address, cryptocurrency) {
+    try {
+      const endpoints = await AdminSettingsService.getGetblockEndpoints();
+      const endpoint = cryptocurrency === 'BTC' ? endpoints.btc : endpoints.ltc;
+      
+      // Use BlockCypher as fallback for UTXO data since it's more developer-friendly
+      const blockcypherUrl = cryptocurrency === 'BTC' 
+        ? `https://api.blockcypher.com/v1/btc/main/addrs/${address}?unspentOnly=true`
+        : `https://api.blockcypher.com/v1/ltc/main/addrs/${address}?unspentOnly=true`;
+      
+      const response = await axios.get(blockcypherUrl, {
+        params: {
+          token: process.env.BLOCKCYPHER_API_KEY
         },
         timeout: 10000
       });
-
-      if (response.data.error) {
-        throw new Error(`Getblock.io error: ${response.data.error.message}`);
-      }
-
+      
+      const utxos = (response.data.txrefs || []).map(utxo => ({
+        txid: utxo.tx_hash,
+        vout: utxo.tx_output_n,
+        value: utxo.value,
+        scriptPubKey: utxo.script || ''
+      }));
+      
+      logger.info(`Found ${utxos.length} UTXOs for address ${address}`);
+      
       return {
         success: true,
-        txHash: response.data.result
+        utxos: utxos,
+        totalValue: utxos.reduce((sum, utxo) => sum + utxo.value, 0)
       };
-      */
-
+      
     } catch (error) {
-      logger.error(`Error sending transaction:`, error);
+      logger.error(`Error getting UTXOs for ${address}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Broadcast transaction to network
+  static async broadcastTransaction(rawTx, cryptocurrency) {
+    try {
+      // Use BlockCypher for broadcasting since it's easier to use
+      const blockcypherUrl = cryptocurrency === 'BTC' 
+        ? 'https://api.blockcypher.com/v1/btc/main/txs/push'
+        : 'https://api.blockcypher.com/v1/ltc/main/txs/push';
+      
+      const response = await axios.post(blockcypherUrl, {
+        tx: rawTx
+      }, {
+        params: {
+          token: process.env.BLOCKCYPHER_API_KEY
+        },
+        timeout: 15000
+      });
+      
+      logger.info(`Transaction broadcasted successfully: ${response.data.tx.hash}`);
+      
+      return {
+        success: true,
+        txHash: response.data.tx.hash
+      };
+      
+    } catch (error) {
+      logger.error('Error broadcasting transaction:', error);
       return { success: false, error: error.message };
     }
   }
@@ -431,60 +535,21 @@ class WalletService {
   /**
    * Send transaction
    */
+  /**
+   * Send transaction (main interface)
+   */
   static async sendTransaction({ fromAddress, toAddress, amount, cryptocurrency, privateKey }) {
     try {
       logger.info(`Sending ${amount} ${cryptocurrency} from ${fromAddress} to ${toAddress}`);
       
-      // Mock implementation for now
-      const mockTxHash = crypto.randomBytes(32).toString('hex');
-      
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      return {
-        success: true,
-        txHash: mockTxHash,
-        amount: amount,
-        cryptocurrency: cryptocurrency,
-        fromAddress: fromAddress,
-        toAddress: toAddress
-      };
-
-      /* 
-      // Real implementation for Getblock.io
-      const endpoint = GETBLOCK_ENDPOINTS[cryptocurrency];
-      if (!endpoint) {
+      if (cryptocurrency === 'BTC') {
+        return await this.sendBitcoinTransaction(fromAddress, toAddress, amount, privateKey);
+      } else if (cryptocurrency === 'LTC') {
+        return await this.sendLitecoinTransaction(fromAddress, toAddress, amount, privateKey);
+      } else {
         throw new Error(`Unsupported cryptocurrency: ${cryptocurrency}`);
       }
-
-      // This would require importing the private key to the wallet first
-      // Then calling sendtoaddress or similar method
-      const response = await axios.post(endpoint, {
-        jsonrpc: '2.0',
-        method: 'sendtoaddress',
-        params: [toAddress, amount],
-        id: Date.now()
-      }, {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      });
-
-      if (response.data.error) {
-        throw new Error(`Getblock.io error: ${response.data.error.message}`);
-      }
-
-      return {
-        success: true,
-        txHash: response.data.result,
-        amount: amount,
-        cryptocurrency: cryptocurrency,
-        fromAddress: fromAddress,
-        toAddress: toAddress
-      };
-      */
-
+      
     } catch (error) {
       logger.error(`Error sending transaction:`, error);
       return { success: false, error: error.message };
