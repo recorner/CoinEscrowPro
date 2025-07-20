@@ -2,17 +2,22 @@
 
 Production-grade Telegram bot for automated peer-to-peer crypto escrow transactions using BTC and LTC.
 
+## 📚 Documentation
+
+- **[📖 Complete Payment & Deal Process Guide](PAYMENT_PROCESS_GUIDE.md)** - Comprehensive guide covering the entire payment flow, technical implementation, and troubleshooting
+- **[🏗️ Project Summary](PROJECT_SUMMARY.md)** - Development overview and technical architecture
+
 ## Features
 
-- 🤝 Automated escrow deal management
-- 💰 BTC & LTC wallet integration via BlockCypher/GetBlock.io
-- 👥 Private group creation for each deal
-- ⏱️ Countdown timers and automatic confirmations
+- 🤝 Automated escrow deal management with secure private key storage
+- 💰 BTC & LTC support via configurable Getblock.io endpoints  
+- 👥 Private group creation for each deal with MTProto integration
+- ⏱️ Real-time payment monitoring and automatic confirmations
 - 🏆 Reputation system and vouch management
-- 📊 Public stats and analytics
-- 💸 Referral and monetization system
-- 🛡️ Admin controls and dispute resolution
-- 🔐 Secure wallet and transaction handling
+- 📊 Public stats and comprehensive analytics
+- 💸 Tiered fee structure ($5 < $100, 5% > $100) with automatic collection
+- 🛡️ Complete admin panel with settings management
+- 🔐 AES-256-CBC encrypted private key storage and secure transaction handling
 
 ## Quick Start
 
@@ -113,20 +118,50 @@ Alternative blockchain API provider with similar functionality.
 
 ## Database Schema
 
-The bot uses Prisma ORM with PostgreSQL for data persistence:
-- Users and profiles
-- Escrow deals and transactions
-- Wallet addresses
-- Referral tracking
-- Audit logs
-
 ## Security Features
 
-- Encrypted sensitive data
-- Role-based access control
-- Transaction audit trails
-- Rate limiting
-- Input validation
+- **Private Key Encryption**: AES-256-CBC encryption for all escrow private keys
+- **Master Key Management**: Configurable master encryption key via environment
+- **Admin Settings Security**: Encrypted storage of API endpoints and secrets
+- **Role-based Access Control**: Admin-only commands and configurations
+- **Complete Audit Trail**: Full transaction and action logging
+- **Rate Limiting**: Protection against abuse and DoS attacks
+- **Input Validation**: Comprehensive sanitization of all inputs
+- **Secure Communication**: HTTPS-only API calls and webhook verification
+
+## Payment Process Overview
+
+### For Buyers
+1. Start deal → Set crypto & amount → Set wallet address
+2. Wait for escrow generation → Send payment to escrow address  
+3. Wait for confirmation → Release funds when satisfied
+
+### For Sellers  
+1. Join deal → Set wallet address → Wait for payment
+2. Deliver goods/services → Wait for buyer release
+3. Receive automatic payout (minus platform fees)
+
+### Fee Structure
+- **Small Deals**: $5 flat fee for deals under $100
+- **Large Deals**: 5% of total amount for deals $100 and above
+- **Automatic Collection**: Fees deducted during fund release
+- **Transparent**: All fees shown before confirmation
+
+**[📖 Read the Complete Payment Guide](PAYMENT_PROCESS_GUIDE.md)** for detailed process documentation.
+
+## Admin Configuration
+
+### Default Payout Wallets
+- **BTC**: `bc1q8fwypfetn5mu994wpxh70ag9mtq54gaa9d44le`
+- **LTC**: `LMToh58PhRsHsSskrdYX9FoCN187hZdfod`
+
+### Admin Commands
+- `/initdefaults` - Initialize default settings
+- `/setgetblock <BTC|LTC> <endpoint>` - Configure Getblock.io endpoints
+- `/setwebsocket <BTC|LTC> <websocket>` - Configure WebSocket endpoints  
+- `/setpayout <BTC|LTC> <address>` - Set payout wallet addresses
+- `/listsettings` - View all configurations
+- `/platformstats` - View platform statistics
 
 ## Contributing
 
