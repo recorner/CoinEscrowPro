@@ -1,0 +1,16 @@
+node_modules/
+.env
+*.log
+logs/
+dist/
+build/
+.DS_Store
+.vscode/
+.idea/
+*.tmp
+*.temp
+coverage/
+.nyc_output/
+.cache/
+prisma/migrations/
+!prisma/migrations/.gitkeep

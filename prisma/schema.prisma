@@ -1,0 +1,292 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String   @id @default(uuid())
+  telegramId        String   @unique
+  username          String?
+  firstName         String?
+  lastName          String?
+  isBot             Boolean  @default(false)
+  languageCode      String?
+  isActive          Boolean  @default(true)
+  reputation        Int      @default(0)
+  successfulDeals   Int      @default(0)
+  totalVolumeBtc    Decimal  @default(0) @db.Decimal(18, 8)
+  totalVolumeLtc    Decimal  @default(0) @db.Decimal(18, 8)
+  referralCode      String   @unique
+  referredBy        String?
+  isAdmin           Boolean  @default(false)
+  isSuperAdmin      Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  dealsAsBuyer      Deal[]   @relation("BuyerDeals")
+  dealsAsSeller     Deal[]   @relation("SellerDeals")
+  wallets           Wallet[]
+  referrals         User[]   @relation("UserReferrals")
+  referrer          User?    @relation("UserReferrals", fields: [referredBy], references: [id])
+  logs              AuditLog[]
+  groupMemberships  GroupMember[]
+  reportsMade       Report[] @relation("ReportsMade")
+  reportsReceived   Report[] @relation("ReportsReceived")
+
+  @@map("users")
+}
+
+model Deal {
+  id                String      @id @default(uuid())
+  dealNumber        String      @unique
+  status            DealStatus  @default(PENDING)
+  cryptocurrency    CryptoType
+  amount            Decimal     @db.Decimal(18, 8)
+  feePercentage     Decimal     @default(0.5) @db.Decimal(5, 2)
+  feeAmount         Decimal     @default(0) @db.Decimal(18, 8)
+  buyerId           String?
+  sellerId          String?
+  buyerAddress      String?
+  buyerUsername     String?
+  sellerAddress     String?
+  sellerUsername    String?
+  escrowAddress     String?
+  escrowPrivateKey  String?     // Encrypted
+  timeoutMinutes    Int         @default(60)
+  expiresAt         DateTime?
+  confirmationsReq  Int         @default(1)
+  confirmationsRec  Int         @default(0)
+  transactionHash   String?
+  groupId           String?
+  groupInviteLink   String?
+  isDisputed        Boolean     @default(false)
+  disputeReason     String?
+  releasedAt        DateTime?
+  cancelledAt       DateTime?
+  cancelReason      String?
+  referralGroupId   String?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  // Relations
+  buyer             User?       @relation("BuyerDeals", fields: [buyerId], references: [id])
+  seller            User?       @relation("SellerDeals", fields: [sellerId], references: [id])
+  transactions      Transaction[]
+  wallets           DealWallet[]
+  logs              AuditLog[]
+  group             Group?      @relation(fields: [groupId], references: [id])
+  referralGroup     ReferralGroup? @relation(fields: [referralGroupId], references: [id])
+
+  @@map("deals")
+}
+
+model Wallet {
+  id          String     @id @default(uuid())
+  userId      String
+  address     String
+  label       String?
+  crypto      CryptoType
+  isActive    Boolean    @default(true)
+  isVerified  Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  user        User       @relation(fields: [userId], references: [id])
+  dealWallets DealWallet[]
+
+  @@unique([userId, address])
+  @@map("wallets")
+}
+
+model DealWallet {
+  id        String     @id @default(uuid())
+  dealId    String
+  walletId  String
+  role      WalletRole
+  createdAt DateTime   @default(now())
+
+  // Relations
+  deal      Deal       @relation(fields: [dealId], references: [id])
+  wallet    Wallet     @relation(fields: [walletId], references: [id])
+
+  @@unique([dealId, role])
+  @@map("deal_wallets")
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  dealId          String
+  hash            String            @unique
+  fromAddress     String?
+  toAddress       String
+  amount          Decimal           @db.Decimal(18, 8)
+  feeAmount       Decimal?          @db.Decimal(18, 8)
+  cryptocurrency  CryptoType
+  confirmations   Int               @default(0)
+  status          TransactionStatus @default(PENDING)
+  blockHeight     Int?
+  blockHash       String?
+  type            TransactionType
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  deal            Deal              @relation(fields: [dealId], references: [id])
+
+  @@map("transactions")
+}
+
+model Group {
+  id              String        @id @default(uuid())
+  telegramId      String        @unique
+  title           String
+  description     String?
+  inviteLink      String?
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  members         GroupMember[]
+  deals           Deal[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id        String     @id @default(uuid())
+  groupId   String
+  userId    String
+  role      GroupRole  @default(MEMBER)
+  joinedAt  DateTime   @default(now())
+
+  // Relations
+  group     Group      @relation(fields: [groupId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+model ReferralGroup {
+  id                String   @id @default(uuid())
+  telegramId        String   @unique
+  title             String
+  adminUserId       String
+  feePercentage     Decimal  @default(1.0) @db.Decimal(5, 2)
+  totalEarnings     Decimal  @default(0) @db.Decimal(18, 8)
+  totalDeals        Int      @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  deals             Deal[]
+
+  @@map("referral_groups")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  dealId    String?
+  action    String
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User?    @relation(fields: [userId], references: [id])
+  deal      Deal?    @relation(fields: [dealId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Report {
+  id           String      @id @default(uuid())
+  reporterId   String
+  reportedId   String
+  dealId       String?
+  reason       String
+  description  String?
+  status       ReportStatus @default(PENDING)
+  resolvedBy   String?
+  resolvedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  reporter     User        @relation("ReportsMade", fields: [reporterId], references: [id])
+  reported     User        @relation("ReportsReceived", fields: [reportedId], references: [id])
+
+  @@map("reports")
+}
+
+model BotStats {
+  id                String   @id @default(uuid())
+  totalUsers        Int      @default(0)
+  totalDeals        Int      @default(0)
+  successfulDeals   Int      @default(0)
+  totalVolumeBtc    Decimal  @default(0) @db.Decimal(18, 8)
+  totalVolumeLtc    Decimal  @default(0) @db.Decimal(18, 8)
+  totalFees         Decimal  @default(0) @db.Decimal(18, 8)
+  date              DateTime @default(now()) @db.Date
+  createdAt         DateTime @default(now())
+
+  @@unique([date])
+  @@map("bot_stats")
+}
+
+// Enums
+enum DealStatus {
+  PENDING
+  WAITING_PAYMENT
+  FUNDED
+  RELEASED
+  CANCELLED
+  DISPUTED
+  EXPIRED
+}
+
+enum CryptoType {
+  BTC
+  LTC
+}
+
+enum WalletRole {
+  BUYER
+  SELLER
+  ESCROW
+}
+
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum TransactionType {
+  DEPOSIT
+  RELEASE
+  REFUND
+}
+
+enum GroupRole {
+  ADMIN
+  MEMBER
+}
+
+enum ReportStatus {
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
